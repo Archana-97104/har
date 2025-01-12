@@ -1,0 +1,257 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ad Beacons Analysis</title>
+    <style>
+        /* General body styling */
+        body {
+            font-family: 'Arial', sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: #121212; /* Dark background */
+            color: #e0e0e0; /* Light text for contrast */
+        }
+
+        /* Header styling */
+        header {
+            background-color: #1e1e1e;
+            color: #ffffff;
+            padding: 20px;
+            text-align: center;
+            box-shadow: 0px 4px 6px rgba(0, 0, 0, 0.3);
+        }
+
+        header h1 {
+            margin: 0;
+            font-size: 2rem;
+            font-weight: 600;
+        }
+
+        /* Container styling */
+        .container {
+            max-width: 600px;
+            margin: 40px auto;
+            padding: 20px;
+            background: #1e1e1e; /* Dark grey container */
+            border-radius: 10px;
+            box-shadow: 0px 4px 10px rgba(0, 0, 0, 0.5);
+        }
+
+        .upload-container {
+            text-align: center;
+            margin-bottom: 20px;
+        }
+
+        /* File input styling */
+        input[type="file"] {
+            display: none;
+        }
+
+        .custom-file-upload {
+            display: inline-block;
+            padding: 12px 25px;
+            font-size: 1rem;
+            color: #e0e0e0;
+            border: 2px solid #444;
+            border-radius: 6px;
+            background: #2c2c2c; /* Medium grey */
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .custom-file-upload:hover {
+            background-color: #444;
+            border-color: #666;
+        }
+
+        button {
+            margin-top: 15px;
+            padding: 12px 25px;
+            font-size: 1rem;
+            background-color: #444;
+            color: #e0e0e0;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        button:hover {
+            background-color: #666;
+        }
+
+        /* Results and error styling */
+        .acknowledgement {
+            margin-top: 10px;
+            font-size: 1rem;
+            color: #81c784; /* Green for success */
+        }
+
+        .results-container {
+            display: none;
+            margin-top: 20px;
+            padding: 15px;
+            background-color: #232323;
+            border: 1px solid #333;
+            border-radius: 6px;
+        }
+
+        .results-container h3 {
+            color: #90caf9; /* Light blue */
+        }
+
+        .error {
+            display: none;
+            margin-top: 20px;
+            padding: 15px;
+            background-color: #2d1e1e;
+            border: 1px solid #5c1a1a;
+            border-radius: 6px;
+            color: #f28b82; /* Soft red for error text */
+        }
+
+        ul {
+            list-style-type: none;
+            padding: 0;
+        }
+
+        li {
+            margin: 5px 0;
+        }
+
+        .ad-beacon {
+            color: #81c784; /* Green for success */
+        }
+
+        .fail {
+            color: #f28b82; /* Soft red for failure */
+        }
+
+        .pass {
+            color: #81c784; /* Green for PASS */
+        }
+
+        .fail-text {
+            color: #f28b82; /* Red for FAIL */
+        }
+
+        /* Footer styling */
+        footer {
+            margin-top: 40px;
+            text-align: center;
+            color: #777;
+            font-size: 0.9rem;
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>Ad Beacons Analysis</h1>
+    </header>
+    <div class="container">
+        <div class="upload-container">
+            <label for="harFile" class="custom-file-upload">Choose HAR File</label>
+            <input type="file" id="harFile" accept=".har" />
+            <button onclick="uploadHarFile()">Upload and Analyze</button>
+            <p class="acknowledgement" id="acknowledgement" style="display: none;">File uploaded successfully!</p>
+        </div>
+
+        <div class="results-container" id="resultsContainer">
+            <h3>Analysis Results:</h3>
+            <p id="status"></p>
+            <h4>Actual Ad Beacons:</h4>
+            <ul id="adBeacons"></ul>
+            <button onclick="clearResults()">Upload Another File</button>
+        </div>
+
+        <div class="error" id="errorContainer">
+            <p>An error occurred during the analysis. Please try again.</p>
+        </div>
+    </div>
+    <footer>
+        &copy; 2025 HAR File Analysis Tool. All rights reserved.
+    </footer>
+    <script>
+        async function uploadHarFile() {
+            const fileInput = document.getElementById('harFile');
+            const file = fileInput.files[0];
+            const acknowledgement = document.getElementById('acknowledgement');
+
+            if (!file) {
+                alert("Please select a file to upload.");
+                return;
+            }
+
+            if (!file.name.endsWith('.har')) {
+                alert("Please upload a valid HAR file.");
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append('file', file);
+
+            try {
+                const response = await fetch('http://127.0.0.1:5000/upload', {  // Ensure URL matches the backend
+                    method: 'POST',
+                    body: formData
+                });
+                const result = await response.json();
+
+                if (response.ok) {
+                    // Show acknowledgement
+                    acknowledgement.style.display = 'block';
+                    displayResults(result);
+                } else {
+                    displayError(result.error || 'Unknown error');
+                }
+            } catch (error) {
+                displayError(error.message || 'Network error');
+            }
+        }
+
+        function displayResults(result) {
+            const resultsContainer = document.getElementById('resultsContainer');
+            const status = document.getElementById('status');
+            const adBeacons = document.getElementById('adBeacons');
+            const errorContainer = document.getElementById('errorContainer');
+
+            resultsContainer.style.display = 'block';
+            errorContainer.style.display = 'none';
+
+            // Display validation status
+            status.innerHTML = `Validation Status: <span class="${result.result === "Pass" ? 'pass' : 'fail-text'}">${result.result}</span>`;
+
+            // Display ad beacons
+            adBeacons.innerHTML = '';
+            result.beacon_order.forEach(beacon => {
+                const li = document.createElement('li');
+                li.classList.add(result.result === "Pass" ? 'ad-beacon' : 'fail');
+                li.textContent = beacon;
+                adBeacons.appendChild(li);
+            });
+        }
+
+        function displayError(errorMessage) {
+            const resultsContainer = document.getElementById('resultsContainer');
+            const errorContainer = document.getElementById('errorContainer');
+            const adBeacons = document.getElementById('adBeacons');
+
+            resultsContainer.style.display = 'none';
+            errorContainer.style.display = 'block';
+            adBeacons.innerHTML = ''; // Clear previous results
+        }
+
+        function clearResults() {
+            const fileInput = document.getElementById('harFile');
+            fileInput.value = ''; // Clear file input
+            const resultsContainer = document.getElementById('resultsContainer');
+            const acknowledgement = document.getElementById('acknowledgement');
+            acknowledgement.style.display = 'none';
+            resultsContainer.style.display = 'none';
+        }
+    </script>
+</body>
+</html>
