@@ -1,0 +1,174 @@
+from flask import Flask, request, render_template, jsonify
+import os
+import json
+
+app = Flask(__name__)
+UPLOAD_FOLDER = 'uploads'
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
+
+# Flexible pairs where order does not matter
+FLEXIBLE_PAIRS = [
+    {"slotImpression", "defaultImpression"},
+    {"complete", "slotEnd"},
+    {"videoView", "slotEnd"}
+]
+
+# Condition 1: Exact order of expected beacons
+EXPECTED_ORDER = [
+    "slotImpression",
+    "defaultImpression",
+    "firstQuartile",
+    "midPoint",
+    "thirdQuartile",
+    "complete",
+    "videoView",
+    "slotEnd"
+]
+
+# Condition 2: Extended order with repeated segments of expected beacons
+EXPECTED_REPEATED_ORDER = [
+    "slotImpression", "defaultImpression", "firstQuartile", "midPoint", "thirdQuartile", "complete", 
+    "videoView", "slotEnd", "slotImpression", "defaultImpression", "firstQuartile", "midPoint", 
+    "thirdQuartile", "complete", "videoView", "slotEnd"
+]
+
+# Condition 3: Sequence with repeated parts (preroll and midroll4)
+EXPECTED_PREROLL_MIDROLL4 = [
+    "slotImpression", "defaultImpression", "firstQuartile", "midPoint", "thirdQuartile", "complete", 
+    "videoView", "slotEnd", "slotImpression", "defaultImpression", "firstQuartile", "midPoint", 
+    "thirdQuartile", "complete", "defaultImpression", "firstQuartile", "midPoint", "thirdQuartile", 
+    "complete", "defaultImpression", "firstQuartile", "midPoint", "thirdQuartile", "complete", 
+    "videoView", "slotEnd"
+]
+
+# Condition 4: Midroll2 - Check the first part and second part sequence
+EXPECTED_MIDROLL2_PART1 = [
+    "slotImpression", "defaultImpression", "firstQuartile", "midPoint", "thirdQuartile", "complete"
+]
+EXPECTED_MIDROLL2_PART2 = [
+    "defaultImpression", "firstQuartile", "midPoint", "thirdQuartile", "complete", "videoView", "slotEnd"
+]
+
+# Condition 5: Midroll3 - Check the four parts sequence
+EXPECTED_MIDROLL3_PART1 = [
+    "slotImpression", "defaultImpression", "firstQuartile", "midPoint", "thirdQuartile", "complete"
+]
+EXPECTED_MIDROLL3_PART2 = [
+    "defaultImpression", "firstQuartile", "midPoint", "thirdQuartile", "complete"
+]
+EXPECTED_MIDROLL3_PART3 = [
+    "defaultImpression", "firstQuartile", "midPoint", "thirdQuartile", "complete"
+]
+EXPECTED_MIDROLL3_PART4 = [
+    "videoView", "slotEnd"
+]
+
+# Function to parse HAR file and extract relevant data
+def parse_har(file_path):
+    with open(file_path, 'r', encoding='utf-8') as f:
+        har_data = json.load(f)
+
+    entries = har_data.get('log', {}).get('entries', [])
+    beacon_order = []
+
+    for entry in entries:
+        url = entry.get('request', {}).get('url', '')
+        if "https://29773.v.fwmrm.net" in url:
+            # Extract 'cn' value from URL and add it to beacon_order
+            params = dict(item.split('=') for item in url.split('?')[1].split('&'))
+            cn_value = params.get('cn')
+            if cn_value:
+                beacon_order.append(cn_value)
+
+    return beacon_order
+
+# Function to check if two elements are a flexible pair
+def is_flexible_pair(pair):
+    return set(pair) in FLEXIBLE_PAIRS
+
+# Function to validate order with flexibility
+def validate_order_with_flexibility(beacon_order, expected_order):
+    i, j = 0, 0
+    while i < len(beacon_order) and j < len(expected_order):
+        # Check exact match
+        if beacon_order[i] == expected_order[j]:
+            i += 1
+            j += 1
+        # Check for flexible pairs
+        elif j + 1 < len(expected_order) and is_flexible_pair([expected_order[j], expected_order[j + 1]]) and \
+                set(beacon_order[i:i+2]) == {expected_order[j], expected_order[j + 1]}:
+            i += 2
+            j += 2
+        else:
+            return False
+    return i == len(beacon_order) and j == len(expected_order)
+
+# Function to check order validity based on conditions
+def check_order(beacon_order):
+    # Condition 1: Validate exact order with flexibility
+    if validate_order_with_flexibility(beacon_order, EXPECTED_ORDER):
+        return "Pass", beacon_order
+    
+    # Condition 2: Validate extended order
+    if validate_order_with_flexibility(beacon_order, EXPECTED_REPEATED_ORDER):
+        return "Pass", beacon_order
+
+    # Condition 3: Validate preroll with midroll4
+    if validate_order_with_flexibility(beacon_order, EXPECTED_PREROLL_MIDROLL4):
+        return "Pass", beacon_order
+
+    # Condition 4: Validate midroll2
+    midroll2_part1 = beacon_order[:6]
+    midroll2_part2 = beacon_order[6:]
+    if (validate_order_with_flexibility(midroll2_part1, EXPECTED_MIDROLL2_PART1) and
+        validate_order_with_flexibility(midroll2_part2, EXPECTED_MIDROLL2_PART2)):
+        return "Pass", beacon_order
+
+    # Condition 5: Validate midroll3
+    midroll3_part1 = beacon_order[:6]
+    midroll3_part2 = beacon_order[6:11]
+    midroll3_part3 = beacon_order[11:16]
+    midroll3_part4 = beacon_order[16:]
+    if (validate_order_with_flexibility(midroll3_part1, EXPECTED_MIDROLL3_PART1) and
+        validate_order_with_flexibility(midroll3_part2, EXPECTED_MIDROLL3_PART2) and
+        validate_order_with_flexibility(midroll3_part3, EXPECTED_MIDROLL3_PART3) and
+        validate_order_with_flexibility(midroll3_part4, EXPECTED_MIDROLL3_PART4)):
+        return "Pass", beacon_order
+
+    return "Fail", beacon_order
+
+@app.route('/')
+def index():
+    return render_template('index.html')
+
+@app.route('/upload', methods=['POST'])
+def upload_file():
+    if 'file' not in request.files:
+        return jsonify({"error": "No file part"}), 400
+
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify({"error": "No selected file"}), 400
+
+    if file:
+        file_path = os.path.join(app.config['UPLOAD_FOLDER'], file.filename)
+        file.save(file_path)
+
+        # Parse HAR file and analyze
+        beacon_order = parse_har(file_path)
+        result, beacon_order = check_order(beacon_order)
+
+        # Clean up temporary file
+        os.remove(file_path)
+
+        # Return results
+        return jsonify({
+            "beacon_order": beacon_order,
+            "result": result,
+            "status": "success",  # Indicates successful processing
+            "message": "Upload another file if needed"
+        })
+
+if __name__ == '__main__':
+    app.run(debug=True)
